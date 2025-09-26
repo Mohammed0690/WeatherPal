@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WeatherPal Test</title>
+  <!-- CesiumJS -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html, body, #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
+    #contextMenu div:hover {
+         background: #444;
+    }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+
+  <!-- Context Menu -->
+  <div id="contextMenu" style="
+    position:absolute; 
+    display:none; 
+    background:#fff; 
+    border:1px solid #ccc; 
+    padding:5px; 
+    z-index:1000;
+    font-size:14px;">
+    <button id="getCoordsBtn">Get Coordinates</button>
+  </div>
+
+  <!-- Date/Time Picker -->
+  <div id="dateTimePicker" style="
+    position:absolute;
+    top:20px; left:20px;
+    background:#fff; 
+    border:1px solid #ccc; 
+    padding:10px;
+    display:none;
+    z-index:1001;">
+    <label>Select Date & Time:</label><br>
+    <input type="datetime-local" id="dateTimeInput"><br><br>
+    <button id="fetchWeatherBtn">Get Weather</button>
+    <button onclick="document.getElementById('dateTimePicker').style.display='none'">Cancel</button>
+  </div>
+
+  <!-- Weather Output -->
+  <div id="weatherOutput" style="
+    position:absolute;
+    bottom:20px; left:20px;
+    background:#fff;
+    border:1px solid #ccc;
+    padding:10px;
+    max-width:250px;
+    display:none;
+    z-index:1002;
+    font-size:14px;">
+  </div>
+
+  <script>
+        // 🔑 Cesium Ion token
+        Cesium.Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJiNTEzOTNjNi0wZGJlLTQ1MWEtYjZhZS00ZTAyYWMyMmI5NDAiLCJpZCI6MzQ0OTIwLCJpYXQiOjE3NTg5MDE5Mzd9.Ci93j0fixbO-lNk93PXVNW_wumpsFLzYPI4HVQdOcVY";
+
+        // 🌍 Create globe with terrain & imagery
+        const viewer = new Cesium.Viewer("cesiumContainer", {
+        terrainProvider: new Cesium.CesiumTerrainProvider({
+            url: Cesium.IonResource.fromAssetId(1) // World Terrain
+        }),
+            imageryProvider: new Cesium.IonImageryProvider({
+            assetId: 2 // Bing Maps Aerial imagery
+            }),
+            baseLayerPicker: true,
+            timeline: false,
+            animation: false,
+        });
+
+        // ☀️ Realistic day/night
+        viewer.scene.globe.enableLighting = true;
+        viewer.scene.globe.showGroundAtmosphere = true;
+        viewer.camera.flyHome(2);
+
+        let pickedCoords = null;
+
+        // 📌 Right click handler
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction(function (movement) {
+            const picked = viewer.scene.pickPosition(movement.position);
+            if (Cesium.defined(picked)) {
+            const carto = Cesium.Cartographic.fromCartesian(picked);
+            const lon = Cesium.Math.toDegrees(carto.longitude).toFixed(4);
+            const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(4);
+            pickedCoords = { lat, lon };
+
+            // show context menu
+            const menu = document.getElementById("contextMenu");
+            menu.style.left = movement.position.x + "px";
+            menu.style.top = movement.position.y + "px";
+            menu.style.display = "block";
+            }
+        }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+        // Hide menu when clicking elsewhere
+        window.addEventListener("click", () => {
+            document.getElementById("contextMenu").style.display = "none";
+        });
+
+        // 📍 "Get Coordinates" clicked
+        document.getElementById("getCoordsBtn").addEventListener("click", () => {
+            if (!pickedCoords) return;
+
+            // limit datetime to ±14 days
+            const now = new Date();
+            const minDate = new Date(now);
+            minDate.setDate(now.getDate() - 14);
+            const maxDate = new Date(now);
+            maxDate.setDate(now.getDate() + 14);
+
+            const input = document.getElementById("dateTimeInput");
+            input.min = minDate.toISOString().slice(0, 16);
+            input.max = maxDate.toISOString().slice(0, 16);
+
+            document.getElementById("dateTimePicker").style.display = "block";
+        });
+
+        // 🌦️ Fetch weather when "Get Weather" clicked
+        document.getElementById("fetchWeatherBtn").addEventListener("click", async () => {
+            const dateTime = document.getElementById("dateTimeInput").value;
+            if (!dateTime || !pickedCoords) return;
+
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${pickedCoords.lat}&longitude=${pickedCoords.lon}&hourly=temperature_2m,precipitation,cloudcover,windspeed_10m&start=${dateTime}&end=${dateTime}`;
+            const res = await fetch(url);
+            const data = await res.json();
+
+            const output = document.getElementById("weatherOutput");
+            output.innerHTML = `
+            <b>📍 Location:</b> ${pickedCoords.lat}, ${pickedCoords.lon}<br>
+            <b>🕒 Date:</b> ${dateTime}<br>
+            <b>🌡️ Temp:</b> ${data.hourly.temperature_2m[0]}°C<br>
+            <b>🌧️ Rain:</b> ${data.hourly.precipitation[0]}mm<br>
+            <b>☁️ Clouds:</b> ${data.hourly.cloudcover[0]}%<br>
+            <b>💨 Wind:</b> ${data.hourly.windspeed_10m[0]} km/h
+            `;
+            output.style.display = "block";
+
+            // hide picker after fetch
+            document.getElementById("dateTimePicker").style.display = "none";
+        });
+    </script>
+</body>
+</html>
